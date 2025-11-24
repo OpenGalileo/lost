@@ -115,35 +115,39 @@ struct CentroidParams {
     int yMax;
     int cutoff;
     bool isValid;
-    std::unordered_set<int> checkedIndices;
+    std::vector<bool> checkedIndices;
+    int pixelCount;
 };
 
 //recursive helper here
 void CogHelper(CentroidParams *p, long i, unsigned char *image, int imageWidth, int imageHeight) {
 
-    if (i >= 0 && i < imageWidth * imageHeight && image[i] >= p->cutoff && p->checkedIndices.count(i) == 0) {
+    if (i >= 0 && i < imageWidth * imageHeight && image[i] >= p->cutoff && !p->checkedIndices[i]) {
+        int x = i % imageWidth;
+        int y = i / imageWidth;
         //check if pixel is on the edge of the image, if it is, we dont want to centroid this star
-        if (i % imageWidth == 0 || i % imageWidth == imageWidth - 1 || i / imageWidth == 0 || i / imageWidth == imageHeight - 1) {
+        if (x == 0 || x == imageWidth - 1 || y == 0 || y == imageHeight - 1) {
             p->isValid = false;
         }
-        p->checkedIndices.insert(i);
-        if (i % imageWidth > p->xMax) {
-            p->xMax = i % imageWidth;
-        } else if (i % imageWidth < p->xMin) {
-            p->xMin = i % imageWidth;
+        p->checkedIndices[i] = true;
+        p.pixelCount++;
+        if (x > p->xMax) {
+            p->xMax = x;
+        } else if (x < p->xMin) {
+            p->xMin = x;
         }
-        if (i / imageWidth > p->yMax) {
-            p->yMax = i / imageWidth;
-        } else if (i / imageWidth < p->yMin) {
-            p->yMin = i / imageWidth;
+        if (y > p->yMax) {
+            p->yMax = y;
+        } else if (y < p->yMin) {
+            p->yMin = y;
         }
         p->magSum += image[i];
-        p->xCoordMagSum += ((i % imageWidth)) * image[i];
-        p->yCoordMagSum += ((i / imageWidth)) * image[i];
-        if (i % imageWidth != imageWidth - 1) {
+        p->xCoordMagSum += ((x)) * image[i];
+        p->yCoordMagSum += ((y)) * image[i];
+        if (x != imageWidth - 1) {
             CogHelper(p, i + 1, image, imageWidth, imageHeight);
         }
-        if (i % imageWidth != 0) {
+        if (x != 0) {
             CogHelper(p, i - 1, image, imageWidth, imageHeight);
         }
         CogHelper(p, i + imageWidth, image, imageWidth, imageHeight);
@@ -153,13 +157,16 @@ void CogHelper(CentroidParams *p, long i, unsigned char *image, int imageWidth, 
 
 std::vector<Star> CenterOfGravityAlgorithm::Go(unsigned char *image, int imageWidth, int imageHeight) const {
     CentroidParams p;
+    p.checkedIndices.assign(imageWidth * imageHeight, false);
 
     std::vector<Star> result;
 
     p.cutoff = BasicThreshold(image, imageWidth, imageHeight);
     for (long i = 0; i < imageHeight * imageWidth; i++) {
-        if (image[i] >= p.cutoff && p.checkedIndices.count(i) == 0) {
+        if (image[i] >= p.cutoff && !p.checkedIndices[i]) {
 
+            int x = i % imageWidth;
+            int y = i / imageWidth;
             //iterate over pixels that are part of the star
             int xDiameter = 0; //radius of current star
             int yDiameter = 0;
@@ -167,24 +174,27 @@ std::vector<Star> CenterOfGravityAlgorithm::Go(unsigned char *image, int imageWi
             p.xCoordMagSum = 0; //x coordinate of current star
             p.magSum = 0; //sum of magnitudes of current star
 
-            p.xMax = i % imageWidth;
-            p.xMin = i % imageWidth;
-            p.yMax = i / imageWidth;
-            p.yMin = i / imageWidth;
+            p.xMax = x;
+            p.xMin = x;
+            p.yMax = y;
+            p.yMin = y;
             p.isValid = true;
 
-            int sizeBefore = p.checkedIndices.size();
+            p.pixelCount = 0;
 
             CogHelper(&p, i, image, imageWidth, imageHeight);
             xDiameter = (p.xMax - p.xMin) + 1;
             yDiameter = (p.yMax - p.yMin) + 1;
 
             //use the sums to finish CoG equation and add stars to the result
-            float xCoord = (p.xCoordMagSum / (p.magSum * 1.0));
-            float yCoord = (p.yCoordMagSum / (p.magSum * 1.0));
+            float xCoord = p.xCoordMagSum / p.magSum;
+            float yCoord = p.yCoordMagSum / p.magSum;
 
             if (p.isValid) {
-                result.push_back(Star(xCoord + 0.5f, yCoord + 0.5f, ((float)(xDiameter))/2.0f, ((float)(yDiameter))/2.0f, p.checkedIndices.size() - sizeBefore));
+                result.push_back(Star(xCoord + 0.5f, yCoord + 0.5f, 
+                    ((float)(xDiameter))/2.0f, 
+                    ((float)(yDiameter))/2.0f, 
+                    p.pixelCount));
             }
         }
     }
@@ -205,16 +215,17 @@ struct IWCoGParams {
     int maxIntensity;
     int guess;
     bool isValid;
-    std::unordered_set<int> checkedIndices;
+    std::vector<bool> checked;
+
 };
 
 void IWCoGHelper(IWCoGParams *p, long i, unsigned char *image, int imageWidth, int imageHeight, std::vector<int> *starIndices) {
-    if (i >= 0 && i < imageWidth * imageHeight && image[i] >= p->cutoff && p->checkedIndices.count(i) == 0) {
+    if (i >= 0 && i < imageWidth * imageHeight && image[i] >= p->cutoff && !p->checked[i]) {
         //check if pixel is on the edge of the image, if it is, we dont want to centroid this star
         if (i % imageWidth == 0 || i % imageWidth == imageWidth - 1 || i / imageWidth == 0 || i / imageWidth == imageHeight - 1) {
             p->isValid = false;
         }
-        p->checkedIndices.insert(i);
+        p->checked[i] = true;
         starIndices->push_back(i);
         if (image[i] > p->maxIntensity) {
             p->maxIntensity = image[i];
@@ -243,12 +254,13 @@ void IWCoGHelper(IWCoGParams *p, long i, unsigned char *image, int imageWidth, i
 
 Stars IterativeWeightedCenterOfGravityAlgorithm::Go(unsigned char *image, int imageWidth, int imageHeight) const {
     IWCoGParams p;
+    p.checked.assign(imageWidth * imageHeight, false);
+    int imageSize = imageWidth * imageHeight;
     std::vector<Star> result;
     p.cutoff = BasicThreshold(image, imageWidth, imageHeight);
-    for (long i = 0; i < imageHeight * imageWidth; i++) {
+    for (long i = 0; i < imageSize; i++) {
         //check if pixel is part of a "star" and has not been iterated over
-        if (image[i] >= p.cutoff && p.checkedIndices.count(i) == 0) {
-            // TODO: store longs --Mark
+        if (image[i] >= p.cutoff && !p.checked[i]) {
             std::vector<int> starIndices; //indices of the current star
             p.maxIntensity = 0;
             int xDiameter = 0;
